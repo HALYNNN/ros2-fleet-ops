@@ -1,0 +1,29 @@
+[Unit]
+Description=ros2-fleet-ops collector and web monitor (docker compose)
+Documentation=https://github.com/HALYNNN/ros2-fleet-ops
+Requires=docker.service
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ros2-fleet-ops
+EnvironmentFile=-/etc/ros2-fleet-ops.env
+ExecStartPre=/usr/bin/docker compose -f /opt/ros2-fleet-ops/docker-compose.yml config -q
+ExecStart=/usr/bin/docker compose -f /opt/ros2-fleet-ops/docker-compose.yml up --no-build --remove-orphans
+ExecStop=/usr/bin/docker compose -f /opt/ros2-fleet-ops/docker-compose.yml down
+ExecReload=/usr/bin/docker compose -f /opt/ros2-fleet-ops/docker-compose.yml restart collector web_monitor
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=180
+TimeoutStopSec=60
+KillMode=mixed
+# The unit talks to the Docker socket, so it must run as a member of `docker`.
+User=fleetops
+SupplementaryGroups=docker
+NoNewPrivileges=yes
+ProtectSystem=full
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

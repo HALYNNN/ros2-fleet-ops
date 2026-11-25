@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ros2-fleet-ops · Fleet Monitor</title>
+<style>
+  :root {
+    --bg: #0b1220;
+    --panel: #111a2b;
+    --panel-2: #16223a;
+    --line: #223252;
+    --text: #e6edf7;
+    --muted: #8ba0c0;
+    --accent: #4ade80;
+    --blue: #60a5fa;
+    --warn: #fbbf24;
+    --crit: #f87171;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: radial-gradient(1200px 600px at 15% -10%, #14243f 0%, var(--bg) 55%);
+    color: var(--text);
+    font-family: "Pretendard", -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+      "Noto Sans KR", sans-serif;
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 18px 24px; border-bottom: 1px solid var(--line);
+    background: rgba(11, 18, 32, 0.75); backdrop-filter: blur(8px);
+    position: sticky; top: 0; z-index: 5;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .logo {
+    width: 34px; height: 34px; border-radius: 10px;
+    background: linear-gradient(145deg, #2563eb, #14b8a6);
+    display: grid; place-items: center; font-weight: 800; font-size: 15px; color: #fff;
+    box-shadow: 0 0 24px rgba(37, 99, 235, .35);
+  }
+  h1 { margin: 0; font-size: 16px; letter-spacing: .2px; }
+  .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .top-right { display: flex; align-items: center; gap: 10px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px;
+    background: var(--panel); color: var(--muted); font-size: 12px; white-space: nowrap;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.ok { background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+  .dot.warning { background: var(--warn); box-shadow: 0 0 10px var(--warn); }
+  .dot.critical { background: var(--crit); box-shadow: 0 0 10px var(--crit); }
+  .dot.stale, .dot.offline { background: #64748b; }
+  .dot.recorded { background: var(--blue); }
+  main {
+    display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(320px, .85fr);
+    gap: 18px; padding: 18px 24px 28px; max-width: 1500px; margin: 0 auto;
+  }
+  .card {
+    background: linear-gradient(180deg, var(--panel-2), var(--panel));
+    border: 1px solid var(--line); border-radius: 16px; padding: 16px;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, .25);
+  }
+  .card h2 {
+    margin: 0 0 12px; font-size: 12px; font-weight: 600; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--muted);
+    display: flex; justify-content: space-between; align-items: center;
+    
+  }
+  .card h2 span.value { color: var(--text); font-family: var(--mono); letter-spacing: 0; text-transform: none; }
+  .map-wrap { position: relative; border-radius: 12px; overflow: hidden; background: #0a1020; border: 1px solid var(--line); }
+  canvas { display: block; width: 100%; height: auto; }
+  .legend {
+    position: absolute; left: 12px; bottom: 10px; display: flex; gap: 14px;
+    font-size: 11px; color: var(--muted); background: rgba(10, 16, 32, .72);
+    padding: 5px 10px; border-radius: 8px; border: 1px solid var(--line);
+  }
+  .legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+  .kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .kpi { background: #0e172a; border: 1px solid var(--line); border-radius: 12px; padding: 11px 13px; }
+  .kpi .label { color: var(--muted); font-size: 11px; letter-spacing: .04em; }
+  .kpi .value { font-family: var(--mono); font-size: 21px; margin-top: 4px; }
+  .kpi .value small { font-size: 11px; color: var(--muted); margin-left: 3px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+  select, button {
+    font: inherit; color: var(--text); background: #0e172a; border: 1px solid var(--line);
+    border-radius: 9px; padding: 8px 10px; outline: none;
+  }
+  select { min-width: 0; flex: 1 1 190px; font-family: var(--mono); font-size: 12px; }
+  button { cursor: pointer; transition: border-color .15s, background .15s; }
+  button:hover { border-color: #3b82f6; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: linear-gradient(180deg, #2563eb, #1d4ed8); border-color: #3b82f6; font-weight: 600; }
+  button.ghost { background: transparent; }
+  .progress { height: 6px; border-radius: 999px; background: #0a1020; border: 1px solid var(--line); overflow: hidden; margin-top: 12px; }
+  .progress i { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, #22d3ee, #4ade80); transition: width .2s; }
+  .replay-meta { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; margin-top: 6px; font-family: var(--mono); }
+  .alarms { max-height: 420px; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
+  .alarm {
+    display: grid; grid-template-columns: 8px 1fr; gap: 10px; padding: 9px 11px;
+    border: 1px solid var(--line); border-radius: 10px; background: #0d1526;
+  }
+  .alarm .bar { border-radius: 4px; background: var(--warn); margin: 2px 0; }
+  .alarm.critical .bar { background: var(--crit); }
+  .alarm.info .bar { background: var(--blue); }
+  .alarm .msg { font-size: 12.5px; line-height: 1.45; }
+  .alarm .meta { color: var(--muted); font-size: 11px; margin-top: 3px; font-family: var(--mono); }
+  .empty { color: var(--muted); font-size: 12px; padding: 14px 4px; }
+  .runs { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .runs th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+  .runs td { padding: 7px 4px; border-bottom: 1px solid rgba(34, 50, 82, .55); font-family: var(--mono); }
+  .runs tr:last-child td { border-bottom: 0; }
+  .badge { font-size: 10.5px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .badge.healthy { color: var(--accent); border-color: rgba(74, 222, 128, .4); }
+  .badge.degraded { color: var(--warn); border-color: rgba(251, 191, 36, .4); }
+  .badge.critical { color: var(--crit); border-color: rgba(248, 113, 113, .4); }
+  footer { color: var(--muted); font-size: 11px; text-align: center; padding: 0 24px 26px; }
+  @media (max-width: 980px) {
+    main { grid-template-columns: 1fr; padding: 14px; }
+    header { padding: 14px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">RF</div>
+    <div>
+      <h1>ros2-fleet-ops · Fleet Monitor</h1>
+      <div class="sub">ROS 2 telemetry collection · anomaly detection · drive-record replay</div>
+    </div>
+  </div>
+  <div class="top-right">
+    <span class="pill"><span class="dot" id="health-dot"></span><span id="health-text">연결 확인 중</span></span>
+    <span class="pill" id="clock">--:--:--</span>
+  </div>
+</header>
+
+<main>
+  <section>
+    <div class="card">
+      <h2>
+        <span>로봇 궤적 · <span id="robot-label" class="value">-</span></span>
+        <span class="value" id="pose-readout">x - m · y - m · θ -</span>
+      </h2>
+      <div class="map-wrap">
+        <canvas id="map" width="900" height="560"></canvas>
+        <div class="legend">
+          <span><i style="background:#60a5fa"></i>실시간 주행</span>
+          <span><i style="background:#4ade80"></i>Replay</span>
+          <span><i style="background:#f87171"></i>알람 지점</span>
+        </div>
+      </div>
+      <div class="toolbar">
+        <select id="run-select" aria-label="Replay할 주행 기록"></select>
+        <select id="speed-select" aria-label="재생 속도" style="flex: 0 0 110px">
+          <option value="0.5">0.5×</option>
+          <option value="1" selected>1×</option>
+          <option value="2">2×</option>
+          <option value="4">4×</option>
+        </select>
+        <button class="primary" id="replay-start">Replay</button>
+        <button class="ghost" id="replay-stop" disabled>정지</button>
+      </div>
+      <div class="progress"><i id="replay-bar"></i></div>
+      <div class="replay-meta"><span id="replay-state">대기</span><span id="replay-count">0 / 0</span></div>
+    </div>
+  </section>
+
+  <aside style="display:flex; flex-direction:column; gap:18px;">
+    <div class="card">
+      <h2>실시간 지표 <span class="value" id="topic-count">-</span></h2>
+      <div class="kpis">
+        <div class="kpi"><div class="label">속도</div><div class="value" id="kpi-speed">-<small>m/s</small></div></div>
+        <div class="kpi"><div class="label">/odom 주기</div><div class="value" id="kpi-odom">-<small>Hz</small></div></div>
+        <div class="kpi"><div class="label">/scan 주기</div><div class="value" id="kpi-scan">-<small>Hz</small></div></div>
+        <div class="kpi"><div class="label">알람</div><div class="value" id="kpi-alarms">0<small>건</small></div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>알람 로그 <span class="value" id="alarm-run">-</span></h2>
+      <div class="alarms" id="alarm-list"><div class="empty">알람이 없습니다.</div></div>
+    </div>
+
+    <div class="card">
+      <h2>주행 기록 <span class="value" id="run-count">0</span></h2>
+      <table class="runs">
+        <thead><tr><th>run</th><th>샘플</th><th>길이</th><th>판정</th></tr></thead>
+        <tbody id="run-rows"><tr><td colspan="4" class="empty">기록 없음</td></tr></tbody>
+      </table>
+    </div>
+  </aside>
+</main>
+
+<footer>
+  데이터 출처: <code>collector</code> → SQLite/JSONL. ROS 2 Humble + Gazebo(TurtleBot3) 또는 시뮬레이터 모드에서 동일한 파이프라인을 사용합니다.
+</footer>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const api = async (path, options) => {
+    const response = await fetch(path, { headers: { "Content-Type": "application/json" }, ...options });
+    if (!response.ok) throw new Error(`${path} → ${response.status}`);
+    return response.json();
+  };
+
+  const state = {
+    robot: null,
+    summary: null,
+    livePoints: [],
+    replayPoints: [],
+    replayOffset: 0,
+    replayActive: false,
+    lastRunId: null,
+    alarmPoints: [],
+  };
+
+  const arena = { xmin: 0, xmax: 2.4, ymin: 0, ymax: 2.0 };
+
+  function setHealth(status) {
+    const dot = $("health-dot");
+    dot.className = "dot " + (status || "");
+    const labels = { ok: "정상", warning: "경고", critical: "위험", stale: "수신 지연", recorded: "저장된 기록", offline: "오프라인" };
+    $("health-text").textContent = labels[status] || "연결 확인 중";
+  }
+
+  function fitBounds(points) {
+    if (!points.length) return { ...arena };
+    const xs = points.map((p) => p.x), ys = points.map((p) => p.y);
+    const pad = 0.25;
+    return {
+      xmin: Math.min(...xs) - pad, xmax: Math.max(...xs) + pad,
+      ymin: Math.min(...ys) - pad, ymax: Math.max(...ys) + pad,
+    };
+  }
+
+  function draw() {
+    const canvas = $("map");
+    const ctx = canvas.getContext("2d");
+    const points = state.replayActive || state.replayPoints.length ? state.replayPoints : state.livePoints;
+    const bounds = fitBounds(points.length ? points : state.livePoints);
+    const w = canvas.width, h = canvas.height;
+    const pad = 34;
+    const sx = (w - pad * 2) / Math.max(1e-6, bounds.xmax - bounds.xmin);
+    const sy = (h - pad * 2) / Math.max(1e-6, bounds.ymax - bounds.ymin);
+    const scale = Math.min(sx, sy);
+    const ox = pad + ((w - pad * 2) - (bounds.xmax - bounds.xmin) * scale) / 2;
+    const oy = pad + ((h - pad * 2) - (bounds.ymax - bounds.ymin) * scale) / 2;
+    const px = (x) => ox + (x - bounds.xmin) * scale;
+    const py = (y) => h - (oy + (y - bounds.ymin) * scale);
+
+    ctx.clearRect(0, 0, w, h);
+    const g = ctx.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, "#0c1526"); g.addColorStop(1, "#0a1020");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+
+    // 0.5 m grid
+    ctx.strokeStyle = "rgba(34,50,82,.75)"; ctx.lineWidth = 1;
+    for (let x = Math.ceil(bounds.xmin * 2) / 2; x <= bounds.xmax; x += 0.5) {
+      ctx.beginPath(); ctx.moveTo(px(x), 0); ctx.lineTo(px(x), h); ctx.stroke();
+    }
+    for (let y = Math.ceil(bounds.ymin * 2) / 2; y <= bounds.ymax; y += 0.5) {
+      ctx.beginPath(); ctx.moveTo(0, py(y)); ctx.lineTo(w, py(y)); ctx.stroke();
+    }
+    ctx.fillStyle = "rgba(139,160,192,.7)"; ctx.font = "11px ui-monospace, monospace";
+    ctx.fillText("1 m", 10, h - 12);
+
+    const polyline = (pts, color, width) => {
+      if (pts.length < 2) return;
+      ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineJoin = "round";
+      pts.forEach((p, i) => (i ? ctx.lineTo(px(p.x), py(p.y)) : ctx.moveTo(px(p.x), py(p.y))));
+      ctx.stroke();
+    };
+    polyline(state.livePoints, "rgba(96,165,250,.85)", 2.2);
+    polyline(state.replayPoints, "rgba(74,222,128,.95)", 2.6);
+
+    state.alarmPoints.forEach((p) => {
+      ctx.beginPath(); ctx.fillStyle = "rgba(248,113,113,.85)";
+      ctx.arc(px(p.x), py(p.y), 3.4, 0, Math.PI * 2); ctx.fill();
+    });
+
+    if (points.length) {
+      const start = points[0], end = points[points.length - 1];
+      ctx.fillStyle = "#22d3ee";
+      ctx.beginPath(); ctx.arc(px(start.x), py(start.y), 4.2, 0, Math.PI * 2); ctx.fill();
+      // robot marker with heading
+      const yaw = end.yaw ?? 0;
+      const r = 9;
+      ctx.save();
+      ctx.translate(px(end.x), py(end.y));
+      ctx.rotate(-yaw);
+      ctx.fillStyle = "rgba(74,222,128,.16)";
+      ctx.beginPath(); ctx.arc(0, 0, 15, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#4ade80";
+      ctx.beginPath();
+      ctx.moveTo(r, 0); ctx.lineTo(-r * 0.65, r * 0.62); ctx.lineTo(-r * 0.65, -r * 0.62);
+      ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+
+    if (state.livePoints.length) {
+      const last = state.livePoints[state.livePoints.length - 1];
+      $("pose-readout").textContent =
+        `x ${last.x?.toFixed(2)} m · y ${last.y?.toFixed(2)} m · θ ${((last.yaw ?? 0) * 180 / Math.PI).toFixed(0)}°`;
+    }
+  }
+
+  function renderKpis(robot) {
+    if (!robot) return;
+    state.robot = robot;
+    $("robot-label").textContent = `${robot.robot_id} · ${robot.source}`;
+    const topics = Object.fromEntries((robot.topics || []).map((t) => [t.topic, t]));
+    $("kpi-speed").innerHTML = `${robot.pose?.linear_x != null ? Math.abs(robot.pose.linear_x).toFixed(2) : "-"}<small>m/s</small>`;
+    $("kpi-odom").innerHTML = `${topics["/odom"]?.rate_hz ?? "-"}<small>Hz</small>`;
+    $("kpi-scan").innerHTML = `${topics["/scan"]?.rate_hz ?? "-"}<small>Hz</small>`;
+    const alarmTotal = Object.values(robot.alarm_counts || {}).reduce((a, b) => a + b, 0);
+    $("kpi-alarms").innerHTML = `${alarmTotal}<small>건</small>`;
+    $("alarm-run").textContent = robot.run_id ? robot.run_id.slice(-10) : "-";
+    $("topic-count").textContent = `${(robot.topics || []).length} topics`;
+    setHealth(robot.health);
+  }
+
+  function renderAlarms(alarms) {
+    const list = $("alarm-list");
+    if (!alarms || !alarms.length) {
+      list.innerHTML = '<div class="empty">알람이 없습니다.</div>';
+      return;
+    }
+    list.innerHTML = alarms.slice(0, 40).map((a) => {
+      const time = new Date(a.ts * 1000).toLocaleTimeString("ko-KR", { hour12: false });
+      return `<div class="alarm ${a.severity}">
+        <div class="bar"></div>
+        <div><div class="msg">${escapeHtml(a.message)}</div>
+        <div class="meta">${time} · ${a.kind}${a.topic ? " · " + a.topic : ""}</div></div>
+      </div>`;
+    }).join("");
+  }
+
+  function escapeHtml(text) {
+    return String(text ?? "").replace(/[&<>"']/g, (ch) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+  }
+
+  function renderRuns(runs) {
+    const select = $("run-select");
+    const previous = select.value;
+    select.innerHTML = runs.map((run) =>
+      `<option value="${run.run_id}">${run.run_id.slice(-24)} · ${run.sample_count} samples · ${run.duration_s}s</option>`
+    ).join("") || '<option value="">주행 기록 없음</option>';
+    if (previous && runs.some((r) => r.run_id === previous)) select.value = previous;
+    $("run-count").textContent = String(runs.length);
+    $("run-rows").innerHTML = runs.slice(0, 8).map((run) =>
+      `<tr><td>${run.run_id.slice(-14)}</td><td>${run.sample_count}</td><td>${run.duration_s}s</td>
+       <td><span class="badge ${run.alarm_count ? "degraded" : "healthy"}">${run.alarm_count ? "경고 " + run.alarm_count : "정상"}</span></td></tr>`
+    ).join("") || '<tr><td colspan="4" class="empty">기록 없음</td></tr>';
+  }
+
+  function nearestPoint(points, ts) {
+    if (!points.length) return null;
+    let low = 0, high = points.length - 1;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if ((points[mid].ts ?? 0) < ts) low = mid + 1;
+      else high = mid;
+    }
+    const candidate = points[low];
+    const previous = points[Math.max(0, low - 1)];
+    return Math.abs((candidate.ts ?? 0) - ts) <= Math.abs((previous.ts ?? 0) - ts) ? candidate : previous;
+  }
+
+  async function loadLive() {
+    try {
+      const summary = await api("/api/summary");
+      state.summary = summary;
+      const robot = summary.robots?.[0];
+      if (!robot) { setHealth("offline"); return; }
+      renderKpis(robot);
+      renderAlarms(summary.latest_alarms);
+      if (robot.run_id !== state.lastRunId) {
+        state.lastRunId = robot.run_id;
+        state.livePoints = [];
+      }
+      if (!state.replayActive) {
+        const trajectory = await api(`/api/robots/${encodeURIComponent(robot.robot_id)}/trajectory?run_id=${encodeURIComponent(robot.run_id)}`);
+        state.livePoints = trajectory.points || [];
+        try {
+          const alarms = await api(`/api/alarms?run_id=${encodeURIComponent(robot.run_id)}&limit=200`);
+          state.alarmPoints = alarms
+            .map((alarm) => nearestPoint(state.livePoints, alarm.ts))
+            .filter((point) => point !== null);
+        } catch (error) {
+          state.alarmPoints = [];
+        }
+        draw();
+      }
+    } catch (error) {
+      setHealth("offline");
+      console.warn(error);
+    }
+  }
+
+  async function loadRuns() {
+    try {
+      const runs = await api("/api/runs?limit=30");
+      renderRuns(runs);
+    } catch (error) { console.warn(error); }
+  }
+
+  async function startReplay() {
+    const runId = $("run-select").value;
+    if (!runId) return;
+    try {
+      state.replayPoints = [];
+      state.replayOffset = 0;
+      const status = await api("/api/replay", {
+        method: "POST",
+        body: JSON.stringify({ run_id: runId, speed: Number($("speed-select").value) }),
+      });
+      state.replayActive = true;
+      $("replay-start").disabled = true;
+      $("replay-stop").disabled = false;
+      updateReplay(status);
+    } catch (error) {
+      $("replay-state").textContent = "Replay 실패: " + error.message;
+    }
+  }
+
+  async function stopReplay() {
+    try {
+      const status = await api("/api/replay/stop", { method: "POST" });
+      updateReplay(status);
+      state.replayActive = false;
+      state.replayPoints = [];
+      draw();
+    } catch (error) { console.warn(error); }
+  }
+
+  function updateReplay(status) {
+    if (!status) return;
+    const total = status.total || 0;
+    const index = status.index || 0;
+    $("replay-bar").style.width = `${total ? Math.round((index / total) * 100) : 0}%`;
+    $("replay-count").textContent = `${index} / ${total}`;
+    const labels = { running: "재생 중", finished: "재생 완료", stopped: "정지됨", idle: "대기", empty: "프레임 없음" };
+    $("replay-state").textContent = labels[status.state] || status.state;
+    if (["finished", "stopped", "error"].includes(status.state)) {
+      state.replayActive = false;
+      $("replay-start").disabled = false;
+      $("replay-stop").disabled = true;
+    }
+  }
+
+  async function pollReplay() {
+    if (!state.replayActive) return;
+    try {
+      const status = await api(`/api/replay?since=${state.replayOffset}`);
+      const frames = status.frames || [];
+      frames.forEach((frame) => {
+        if (frame.topic === "/odom" && frame.data?.x != null) {
+          state.replayPoints.push({ x: frame.data.x, y: frame.data.y, yaw: frame.data.yaw, ts: frame.source_ts });
+        }
+      });
+      state.replayOffset += frames.length;
+      updateReplay(status);
+      draw();
+    } catch (error) { console.warn(error); }
+  }
+
+  $("replay-start").addEventListener("click", startReplay);
+  $("replay-stop").addEventListener("click", stopReplay);
+
+  setInterval(() => {
+    $("clock").textContent = new Date().toLocaleTimeString("ko-KR", { hour12: false });
+  }, 1000);
+
+  loadRuns();
+  loadLive();
+  setInterval(loadLive, 2000);
+  setInterval(loadRuns, 10000);
+  setInterval(pollReplay, 250);
+})();
+</script>
+</body>
+</html>

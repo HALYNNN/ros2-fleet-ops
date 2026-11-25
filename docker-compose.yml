@@ -1,0 +1,121 @@
+name: ros2-fleet-ops
+
+# ROS 2 DDS discovery between the Gazebo container and the collector needs a
+# shared network. Host networking is the reliable option on Linux; on Docker
+# Desktop (macOS/Windows) use the simulator adapter instead:
+#   python -m collector.collector --mode sim --duration 60
+x-ros-env: &ros-env
+  ROS_DOMAIN_ID: "30"
+  RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+
+services:
+  sim-ros2:
+    build:
+      context: .
+      dockerfile: sim-ros2/Dockerfile
+    image: ros2-fleet-ops/sim-ros2:0.1.0
+    environment:
+      <<: *ros-env
+      TURTLEBOT3_MODEL: burger
+      GAZEBO_GUI: "false"
+    network_mode: host
+    ipc: host
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          bash -lc 'source /opt/ros/humble/setup.bash &&
+          timeout 10 ros2 topic echo --once /odom >/dev/null 2>&1'
+      interval: 20s
+      timeout: 15s
+      retries: 5
+      start_period: 90s
+    restart: unless-stopped
+
+  collector:
+    build:
+      context: .
+      dockerfile: collector/Dockerfile
+    image: ros2-fleet-ops/collector:0.1.0
+    environment:
+      <<: *ros-env
+      FLEET_ROBOT_ID: tb3-01
+    command:
+      - --mode
+      - ros2
+      - --db
+      - /data/fleet.db
+      - --jsonl-dir
+      - /data/jsonl
+      - --robot-id
+      - tb3-01
+      - --use-sim-time
+      - --config
+      - /app/config/collector.yaml
+    volumes:
+      - ./data:/data
+      - ./config:/app/config:ro
+    network_mode: host
+    depends_on:
+      sim-ros2:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-m", "collector.healthcheck", "--db", "/data/fleet.db", "--max-age", "25"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  web_monitor:
+    build:
+      context: .
+      dockerfile: web_monitor/Dockerfile
+    image: ros2-fleet-ops/web-monitor:0.1.0
+    environment:
+      FLEET_DB: /data/fleet.db
+      FLEET_JSONL_DIR: /data/jsonl
+    volumes:
+      - ./data:/data
+    ports:
+      - "8000:8000"
+    depends_on:
+      collector:
+        condition: service_started
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request,sys;
+          sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).status == 200 else 1)
+      interval: 15s
+      timeout: 6s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # Opt-in tool: recreates a fault scenario against the simulator adapter and
+  # stores the result in the same database the dashboard reads.
+  #   docker compose run --rm fault-injector
+  fault-injector:
+    profiles: ["tools"]
+    build:
+      context: .
+      dockerfile: collector/Dockerfile
+    entrypoint: ["python3", "scripts/inject_fault.py"]
+    command:
+      - --mode
+      - sim
+      - --faults
+      - latency,drop,silence,estop
+      - --duration
+      - "30"
+      - --db
+      - /data/fault-injection.db
+      - --jsonl-dir
+      - /data/jsonl
+      - --analyze
+    volumes:
+      - ./data:/data

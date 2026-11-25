@@ -1,0 +1,25 @@
+# Collector thresholds for the TurtleBot3 burger publishing defaults.
+# Loaded with: python -m collector.collector --config config/collector.yaml
+# Values are *expectations*, not measured results - tune them to the robot.
+robot_id: tb3-01
+rate_warn_ratio: 0.5
+rate_window: 20
+gap_spike_factor: 2.5
+estop_speed_threshold: 0.02
+
+topics:
+  - topic: /odom
+    expected_hz: 20
+    max_latency_s: 0.25
+    silence_factor: 3
+    cooldown_s: 2
+  - topic: /scan
+    expected_hz: 10
+    max_latency_s: 0.30
+    silence_factor: 3
+    cooldown_s: 2
+  - topic: /cmd_vel
+    expected_hz: 10
+    max_latency_s: 0.30
+    silence_factor: 4
+    cooldown_s: 2

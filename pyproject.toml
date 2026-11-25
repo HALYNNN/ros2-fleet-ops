@@ -1,0 +1,18 @@
+[project]
+name = "ros2-fleet-ops"
+version = "0.1.0"
+description = "ROS 2 fleet telemetry collector, anomaly analysis and web monitoring for robot operations"
+requires-python = ">=3.10"
+dependencies = ["PyYAML>=6.0,<7.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["collector", "web_monitor"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"

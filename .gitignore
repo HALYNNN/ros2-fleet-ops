@@ -1,0 +1,15 @@
+# Runtime data (SQLite, JSONL archives, heartbeat) - never commit.
+data/
+*.db
+*.db-wal
+*.db-shm
+*.jsonl
+reports/
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.env
+.DS_Store
