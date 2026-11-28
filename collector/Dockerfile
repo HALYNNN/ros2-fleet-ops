@@ -16,7 +16,10 @@ WORKDIR /app
 COPY collector /app/collector
 COPY scripts /app/scripts
 
-RUN if command -v ros2 >/dev/null 2>&1; then \
+# pip ships with python:*-slim but not with ros:humble-ros-base, whose ROS setup
+# script is not sourced under /bin/sh. Check the interpreter itself instead of
+# `ros2`, so python3-pip is installed exactly when the base image lacks pip.
+RUN if ! python3 -m pip --version >/dev/null 2>&1; then \
       apt-get update && apt-get install -y --no-install-recommends python3-pip && \
       rm -rf /var/lib/apt/lists/*; \
     fi \
