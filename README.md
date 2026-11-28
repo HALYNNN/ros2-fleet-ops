@@ -56,7 +56,7 @@ scripts/          # inject_fault.py (시뮬레이터 / ROS 2 모드)
 sim-ros2/         # Gazebo + TurtleBot3 컨테이너
 config/           # 토픽별 기대 주기·지연·정지 임계값 YAML
 deploy/           # systemd 유닛
-tests/            # pytest 87건
+tests/            # pytest 109건
 docs/runbook.md   # 장애 대응 런북
 ```
 
@@ -70,7 +70,7 @@ docs/runbook.md   # 장애 대응 런북
 | 로봇 상태·센서 데이터·주행 기록 수집/재생 파이프라인 | `collector.py`(rclpy 구독, 세 토픽), `storage.py`(SQLite+JSONL), `replay.py`(시간순 재생·배속) |
 | 웹 기반 관제·모니터링 도구 | `web_monitor/main.py` REST API + `static/index.html` Canvas 대시보드(궤적, 측정 Hz, 알람, Replay) |
 | Docker 기반 패키징, 배포, CI/CD | Dockerfile 3종, compose healthcheck·의존성 조건, `.github/workflows/ci.yml`(테스트 + `docker compose config` + 장애 주입 스모크) |
-| 시뮬레이터 연동 및 통합 테스트 자동화 | Gazebo TurtleBot3 컨테이너 + 동일 파이프라인, 시뮬레이터 어댑터로 CI에서 end-to-end 검증, pytest 87건 |
+| 시뮬레이터 연동 및 통합 테스트 자동화 | Gazebo TurtleBot3 컨테이너 + 동일 파이프라인, 시뮬레이터 어댑터로 CI에서 end-to-end 검증, pytest 109건 |
 | 장애 원인 분석 및 재발 방지 | `analyzer.py`(근거·조치·타임라인), `inject_fault.py`로 재현, `docs/runbook.md` 절차 |
 | 외부 관제 플랫폼·AI 서비스와의 API 연동 | JSON REST API(`/api/robots`, `/api/runs`, `/api/alarms`, `/api/replay`), JSONL 원본 보관 |
 
@@ -183,36 +183,41 @@ docker compose down
 ==============================================================================
  ros2-fleet-ops 분석 리포트
 ==============================================================================
- run       tb3-sim-01-20261125T152750-052505
+ run       tb3-sim-01-20261128T205848-a7cf64
  로봇       tb3-sim-01 (sim)
- 구간       2026-11-25 15:27:49 ~ 2026-11-25 15:28:20  (30.251s)
- 샘플       1060건 / 알람 31건
- 판정       DEGRADED
+ 구간       2026-11-28 20:58:47 ~ 2026-11-28 20:59:18  (30.251s)
+ 샘플       1060건 / 알람 33건
+ 판정       CRITICAL
  비고       fault-injection: latency 350ms on /scan, drop every 6th /odom message, silence /scan for 4s from 12s, emergency stop 3s from 22s
 
 [토픽 통계]
  토픽             건수     측정Hz       최대간격     p95지연     결번  알람
  /cmd_vel      300     10.0    101.8ms     1.9ms      0  estop_command×1
  /odom         500     16.7    101.8ms     1.9ms     99  topic_drop×15
- /scan         260      8.7   4099.8ms   351.9ms      0  latency_high×13, topic_recovered×1, topic_silent×1
+ /scan         260      8.7   4099.8ms   351.9ms      0  latency_high×13, rate_low×1, topic_recovered×1, topic_silent×2
 
 [탐지된 이상]
- 1. [warning] latency_high /scan ×13 - 메시지 지연 예산 초과(처리 또는 전송 지연)
-    근거: /scan 지연 351ms (예산 300ms)
-    조치: 수신 타임스탬프와 발행 타임스탬프 차이를 확인하고, 브리지·릴레이·네트워크 구간을 분리 측정한다.
- 2. [warning] topic_drop /odom ×15 - 메시지 드롭(발행 측 큐 또는 수신 버퍼 포화)
-    근거: /odom 메시지 1건 결번 (seq 5 → 7)
-    조치: QoS depth·DDS 버퍼와 수신 측 처리 시간을 확인한다. 결번이 몰리는 시각의 CPU 사용률을 함께 본다.
- 3. [warning] topic_silent /scan ×1 - 해당 토픽의 발행 노드 정지 또는 통신 단절
+ 1. [critical] topic_silent /scan ×2 - 해당 토픽의 발행 노드 정지 또는 통신 단절
     근거: /scan 0.5s 동안 수신 없음 (기준 0.5s)
     조치: 노드 프로세스 상태(systemd/ros2 node list)와 네트워크 링크를 확인하고, 재시작 후 동일 구간을 Replay로 재검증한다.
- 4. [warning] estop_command /cmd_vel ×1 - 비상정지/정지 명령으로 로봇 제어가 끊김
-    근거: cmd_vel=0 인데 odom 속도 0.14 m/s - 비상정지/제어 명령 확인 필요
+ 2. [warning] latency_high /scan ×13 - 메시지 지연 예산 초과(처리 또는 전송 지연)
+    근거: /scan 지연 351ms (예산 300ms)
+    조치: 수신 타임스탬프와 발행 타임스탬프 차이를 확인하고, 브리지·릴레이·네트워크 구간을 분리 측정한다.
+ 3. [warning] topic_drop /odom ×15 - 메시지 드롭(발행 측 큐 또는 수신 버퍼 포화)
+    근거: /odom 메시지 1건 결번 (seq 5 → 7)
+    조치: QoS depth·DDS 버퍼와 수신 측 처리 시간을 확인한다. 결번이 몰리는 시각의 CPU 사용률을 함께 본다.
+ 4. [warning] rate_low /scan ×1 - 발행 주기 저하(노드 부하 또는 설정 변경)
+    근거: /scan 발행 주기 3.3Hz (기대 10Hz)
+    조치: 노드 파라미터의 발행 주기와 CPU/메모리 사용률을 대조한다.
+ 5. [warning] estop_command /cmd_vel ×1 - 비상정지/정지 명령으로 로봇 제어가 끊김
+    근거: cmd_vel=0 이 0.55s 지속인데 odom 속도 0.12 m/s - 비상정지/제어 명령 확인 필요
     조치: cmd_vel 발행자(관제·자율주행 노드)와 비상정지 입력을 확인하고, 정지 해제 후 재개 절차를 따른다.
- 5. [info] topic_recovered /scan ×1 - 토픽 수신 재개
+ 6. [info] topic_recovered /scan ×1 - 토픽 수신 재개
     근거: /scan 수신 재개 (마지막 수신 후 4.10s)
     조치: 재개 시점 이후 샘플로 정상 주기·지연이 회복됐는지 확인한다.
 ```
+
+`/scan` 정지 알람은 0.5s 시점에 `warning`, 1.0s 시점에 `critical`로 올라갑니다. 같은 항목의 심각도가 오르면 쿨다운 중이라도 즉시 다시 발생하므로, 판정이 `DEGRADED`가 아니라 `CRITICAL`이 됩니다.
 
 같은 DB의 정상 주행 run은 `판정 HEALTHY`, 알람 0건으로 나옵니다. `/odom` 측정 20.0 Hz, 결번 0건, p95 지연 1.9 ms — 모두 저장된 샘플에서 계산된 값입니다.
 
@@ -256,7 +261,7 @@ python -m pytest
 ```
 
 ```
-87 passed
+109 passed
 ```
 
 * 저장소: run/sample/alarm 왕복, JSONL 원본, 조회·집계, heartbeat 신선도, 재시작 후 데이터 유지
@@ -275,7 +280,7 @@ GitHub Actions(`.github/workflows/ci.yml`)는 Python 3.11/3.12 매트릭스로 �
 
 **이 작업 환경에서 실제로 실행해 확인한 것**
 
-* `pytest`: 87 passed (Python 3.12.16)
+* `pytest`: 109 passed (Python 3.12.16)
 * 시뮬레이터 모드 수집: 20초 정상 주행 run(샘플 800건), 30초 장애 run(샘플 1,060건) 생성
 * 장애 주입 4종(latency/drop/silence/estop) 탐지 및 `--expect` 단언 통과, 종료 코드 0
 * 분석 리포트 출력(위 7절) — 모든 Hz·ms·결번 수치는 저장된 샘플에서 계산
