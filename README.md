@@ -3,7 +3,7 @@
 ROS 2 로봇의 **상태·센서·주행 기록을 수집하고, 이상을 탐지하고, 다시 재생해서 원인을 좁히는** 운영 파이프라인입니다.
 `/odom`, `/scan`, `/cmd_vel`을 SQLite + JSONL로 적재하고, 규칙 기반 이상 탐지로 알람을 남기며, FastAPI 웹 대시보드에서 궤적·주기(Hz)·알람·Replay를 확인합니다.
 
-네이버랩스 **Robot Software Engineer (Platform & Operations)** (공고 `30005752`)의 *What You'll Do* / *Required Skills*에 대응하도록 만든 개인 프로젝트입니다.
+로봇 SW **플랫폼·운영(Platform & Operations)** 직무를 염두에 두고 만든 개인 프로젝트입니다. Linux·Docker·ROS 2 위에서 도는 로봇의 상태를 수집·관제하고, 장애를 재현해 원인을 좁히는 흐름을 한 저장소에서 끝까지 다룹니다.
 ROS 2 Humble + Gazebo(TurtleBot3)에서 실제로 도는 구성을 제공하면서, **ROS 2가 없는 환경(GitHub Actions, 일반 Python)에서도 시뮬레이터 어댑터 모드로 수집 → 저장 → 탐지 → 분석 → Replay 전체가 동작**하도록 두 가지 소스를 같은 파이프라인에 연결했습니다.
 
 ```
@@ -60,11 +60,11 @@ tests/            # pytest 87건
 docs/runbook.md   # 장애 대응 런북
 ```
 
-## 2. 공고 요건과 구현 대응
+## 2. 플랫폼·운영 역량과 구현 대응
 
-### What You'll Do
+### 플랫폼·운영 업무
 
-| 공고 업무 | 이 프로젝트에서의 구현 |
+| 업무 영역 | 이 프로젝트에서의 구현 |
 | --- | --- |
 | Linux, ROS 2 기반 로봇 SW 플랫폼·운영 환경 구축 | `docker-compose.yml`(sim-ros2 / collector / web_monitor), ROS 2 Humble 기반 `collector/Dockerfile`, `deploy/ros2-fleet-ops.service`(systemd), 서비스별 healthcheck |
 | 로봇 상태·센서 데이터·주행 기록 수집/재생 파이프라인 | `collector.py`(rclpy 구독, 세 토픽), `storage.py`(SQLite+JSONL), `replay.py`(시간순 재생·배속) |
@@ -74,9 +74,9 @@ docs/runbook.md   # 장애 대응 런북
 | 장애 원인 분석 및 재발 방지 | `analyzer.py`(근거·조치·타임라인), `inject_fault.py`로 재현, `docs/runbook.md` 절차 |
 | 외부 관제 플랫폼·AI 서비스와의 API 연동 | JSON REST API(`/api/robots`, `/api/runs`, `/api/alarms`, `/api/replay`), JSONL 원본 보관 |
 
-### Required Skills
+### 핵심 역량
 
-| 요건 | 구현 |
+| 역량 | 구현 |
 | --- | --- |
 | Linux 프로세스·네트워크·systemd 운영 | systemd 유닛(재시작 정책·`ExecStartPre` compose 검증), heartbeat 파일 기반 healthcheck, SIGTERM 정상 종료 처리 |
 | Python 기반 개발 | 전체 (표준 라이브러리 중심 코어 + FastAPI) |
@@ -137,11 +137,15 @@ py -m collector.collector --mode sim --duration 30
 `--mode auto`(기본)는 `rclpy`가 import되면 ROS 2, 아니면 시뮬레이터로 자동 선택합니다.
 시뮬레이터는 TurtleBot3 burger의 발행 주기(odom 20 Hz, scan 10 Hz, cmd_vel 10 Hz)와 사각 순찰 경로, 벽까지의 거리를 계산한 36빔 스캔을 생성합니다.
 
-이 작업 환경에서 만든 데모 run 2건(정상 20초, 장애 30초)이 `data/demo.db`에 남아 있습니다. 바로 대시보드를 띄워 보려면:
+데모 데이터는 저장소에 들어 있지 않습니다(`data/`·`*.db`·`*.jsonl`은 `.gitignore` 대상). 대시보드를 띄우기 전에 시뮬레이터 모드로 run을 하나 이상 만들어 두세요. 위 1) 명령이 `data/fleet.db`에 정상 주행 run을 적재하고 `data/jsonl/`에 원본을 남깁니다.
 
 ```bash
-FLEET_DB=data/demo.db uvicorn web_monitor.main:app --port 8000
+python -m collector.collector --mode sim --duration 30 --db data/fleet.db --jsonl-dir data/jsonl
+uvicorn web_monitor.main:app --host 0.0.0.0 --port 8000
+# http://localhost:8000  (기본으로 data/fleet.db를 읽습니다)
 ```
+
+장애 run까지 함께 보고 싶으면 2) `inject_fault.py`를 한 번 실행해 같은 DB에 run을 추가한 뒤 대시보드를 열면 됩니다. 다른 DB 파일을 쓰려면 `FLEET_DB=data/other.db uvicorn web_monitor.main:app --port 8000`처럼 환경 변수로 지정합니다.
 
 ## 5. 빠른 시작 B — Docker Compose + Gazebo
 
