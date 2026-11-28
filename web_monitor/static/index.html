@@ -333,7 +333,7 @@
       return;
     }
     list.innerHTML = alarms.slice(0, 40).map((a) => {
-      const time = new Date(a.ts * 1000).toLocaleTimeString("ko-KR", { hour12: false });
+      const time = new Date((a.wall_ts ?? a.ts) * 1000).toLocaleTimeString("ko-KR", { hour12: false });
       return `<div class="alarm ${a.severity}">
         <div class="bar"></div>
         <div><div class="msg">${escapeHtml(a.message)}</div>

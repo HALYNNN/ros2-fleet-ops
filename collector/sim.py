@@ -141,8 +141,13 @@ class SimRobot:
         error = _normalize_angle(desired_yaw - self.yaw)
 
         if estop:
-            # Emergency stop: command is zero, the base coasts to a halt.
-            self.speed *= 0.90
+            # Emergency stop: the velocity command is cut, the base coasts.
+            # The decay is deliberately slow (0.98 per 50 Hz tick, so the speed
+            # needs ~2.4 s to fall from 0.22 m/s to the 0.02 m/s standstill
+            # threshold): a genuine control cut must stay visible longer than the
+            # detector's `estop_debounce_s` window, or the alarm could only be
+            # raised by a same-tick cmd_vel/odom ordering accident.
+            self.speed *= 0.98
             self.angular = 0.0
             if abs(self.speed) < 0.01:
                 self.speed = 0.0

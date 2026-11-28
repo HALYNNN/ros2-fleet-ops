@@ -44,10 +44,15 @@ class CollectorCore:
         run_id: str | None = None,
         note: str | None = None,
         clock: Callable[[], float] | None = None,
+        wall_clock: Callable[[], float] | None = None,
     ) -> None:
         self.store = store
         self.config = config or CollectorConfig()
+        # `clock` is the telemetry clock (wall time, or `/clock` under
+        # `--use-sim-time`); `wall_clock` is always the host clock, so liveness
+        # and alarm age stay meaningful even when telemetry starts at 0.
         self.clock = clock or time.time
+        self.wall_clock = wall_clock or time.time
         self.source = source
         self.robot_id = self.config.robot_id
         self.detector = AnomalyDetector(self.config)
@@ -81,9 +86,11 @@ class CollectorCore:
         seq: int | None = None,
         source_ts: float | None = None,
         recv_ts: float | None = None,
+        wall_ts: float | None = None,
     ) -> dict[str, Any]:
         recv = self.clock() if recv_ts is None else float(recv_ts)
         src = recv if source_ts is None else float(source_ts)
+        wall = self.wall_clock() if wall_ts is None else float(wall_ts)
         data = data or {}
         self.store.insert_sample(
             run_id=self.run_id,
@@ -93,6 +100,7 @@ class CollectorCore:
             source_ts=src,
             recv_ts=recv,
             data=data,
+            wall_ts=wall,
         )
         self.samples += 1
         self.sample_counts[topic] = self.sample_counts.get(topic, 0) + 1
@@ -122,7 +130,9 @@ class CollectorCore:
     def _record_alarms(self, alarms: list[Alarm]) -> None:
         for alarm in alarms:
             contextual = alarm.with_context(run_id=self.run_id, robot_id=self.robot_id)
-            self.store.insert_alarm(contextual.to_dict())
+            payload = contextual.to_dict()
+            payload["wall_ts"] = self.wall_clock()
+            self.store.insert_alarm(payload)
             self.alarm_counts[contextual.kind] = self.alarm_counts.get(contextual.kind, 0) + 1
 
     def _heartbeat(self, now: float | None = None) -> None:
@@ -270,6 +280,7 @@ def run_ros2(
                 seq=counters[topic],
                 source_ts=recv if source_ts is None else source_ts,
                 recv_ts=recv,
+                wall_ts=time.time(),
             )
 
         return callback

@@ -9,6 +9,7 @@ burger defaults: /odom 20 Hz, /scan 10 Hz, /cmd_vel 10 Hz).
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,14 @@ class TopicRule:
     silence_factor: float = 3.0
     #: Minimum seconds between two alarms of the same kind for this topic.
     cooldown_s: float = 2.0
+
+    def __post_init__(self) -> None:
+        # A non-positive expectation would divide by zero in `silence_after_s`
+        # and make every rate check meaningless, so reject it at construction.
+        if not self.expected_hz > 0 or not math.isfinite(self.expected_hz):
+            raise ValueError(
+                f"expected_hz must be a positive number for topic {self.topic!r}, got {self.expected_hz!r}"
+            )
 
     @property
     def silence_after_s(self) -> float:
@@ -53,6 +62,10 @@ class CollectorConfig:
     rules: dict[str, TopicRule] = field(default_factory=lambda: dict(DEFAULT_RULES))
     #: odom linear speed below this is "stopped" (m/s).
     estop_speed_threshold: float = 0.02
+    #: zero `cmd_vel` must persist this long (s) before it counts as an e-stop.
+    #: A normal brake also commands zero velocity; only a sustained zero command
+    #: while odom still reports motion is treated as "control was cut".
+    estop_debounce_s: float = 0.5
     #: rate_low fires when measured rate < expected_hz * this ratio.
     rate_warn_ratio: float = 0.5
     #: number of samples used for rate estimation.
@@ -71,6 +84,7 @@ class CollectorConfig:
         return {
             "robot_id": self.robot_id,
             "estop_speed_threshold": self.estop_speed_threshold,
+            "estop_debounce_s": self.estop_debounce_s,
             "rate_warn_ratio": self.rate_warn_ratio,
             "rate_window": self.rate_window,
             "heartbeat_interval_s": self.heartbeat_interval_s,
@@ -97,6 +111,7 @@ class CollectorConfig:
         for key in (
             "robot_id",
             "estop_speed_threshold",
+            "estop_debounce_s",
             "rate_warn_ratio",
             "rate_window",
             "heartbeat_interval_s",

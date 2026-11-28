@@ -64,7 +64,15 @@ def test_silence_fault_is_detected_and_recovers(store, config):
 def test_estop_fault_is_detected(store, config):
     plan = FaultPlan(estop_at_s=1.5, estop_for_s=2.0)
     result, _, _ = run(store, config, duration=4.0, faults=plan)
-    assert "estop_command" in alarm_kinds(store)
+    alarms = [
+        alarm for alarm in store.fetch_alarms(run_id="sim-run") if alarm["kind"] == "estop_command"
+    ]
+    assert alarms, "estop fault must be detected"
+    # It must be caught *inside* the cut (after the 0.5 s debounce), not by the
+    # cmd_vel/odom ordering accident that happens when the command resumes.
+    start = min(row["source_ts"] for row in store.fetch_samples("sim-run", topics=["/odom"]))
+    delay = min(alarm["ts"] for alarm in alarms) - start
+    assert 1.5 <= delay <= 1.5 + 0.8
 
 
 def test_simulation_is_quiet_without_faults(store, config):

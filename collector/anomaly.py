@@ -12,8 +12,11 @@ classify every failure but to give an operator a defensible line of evidence:
 * `estop_command` - `cmd_vel` is zero while `odom` still reports motion
 
 Every alarm passes through a per-(topic, kind) cooldown so a 5-second fault does
-not produce 200 rows. All thresholds are constants from `CollectorConfig`; no
-metric in an alarm is synthesised - `value` always comes from the message.
+not produce 200 rows. Cooldown suppression never hides an escalation: when the
+same finding gets more severe inside the cooldown window (warning -> critical),
+the more severe alarm is emitted immediately and restarts the cooldown. All
+thresholds are constants from `CollectorConfig`; no metric in an alarm is
+synthesised - `value` always comes from the message.
 """
 from __future__ import annotations
 
@@ -76,7 +79,10 @@ class TopicTracker:
     last_seq: int | None = None
     last_recv: float | None = None
     dropped: int = 0
+    #: Recent receive gaps, bounded by the detector to `rate_window` samples so
+    #: `rate_low` reflects the current window and memory stays flat.
     gaps: Deque[float] = field(default_factory=deque)
+    #: Recent latencies, bounded to `rate_window * 10` samples.
     latencies: Deque[float] = field(default_factory=deque)
     silent: bool = False
 
@@ -111,7 +117,8 @@ class AnomalyDetector:
     def __init__(self, config: CollectorConfig | None = None) -> None:
         self.config = config or CollectorConfig()
         self._trackers: dict[str, TopicTracker] = {}
-        self._last_alarm: dict[tuple[str, str], float] = {}
+        #: (topic, kind) -> (timestamp of the last emitted alarm, its severity rank)
+        self._last_alarm: dict[tuple[str, str], tuple[float, int]] = {}
         self._cmd_linear_zero = False
         self._cmd_seen = False
         self._had_motion_cmd = False
@@ -119,10 +126,23 @@ class AnomalyDetector:
 
     # ------------------------------------------------------------ internals
 
+    @property
+    def _rate_window(self) -> int:
+        try:
+            window = int(self.config.rate_window)
+        except (TypeError, ValueError):
+            return 1
+        return max(1, window)
+
     def tracker(self, topic: str) -> TopicTracker:
         tracker = self._trackers.get(topic)
         if tracker is None:
-            tracker = TopicTracker(rule=self.config.rule(topic))
+            window = self._rate_window
+            tracker = TopicTracker(
+                rule=self.config.rule(topic),
+                gaps=deque(maxlen=window),
+                latencies=deque(maxlen=window * 10),
+            )
             self._trackers[topic] = tracker
         return tracker
 
@@ -143,10 +163,15 @@ class AnomalyDetector:
     ) -> Alarm | None:
         key = (topic or "", kind)
         cooldown = self._cooldown_for(kind, self.config.rule(topic or ""))
+        rank = _SEVERITY_RANK.get(severity, 1)
         last = self._last_alarm.get(key)
-        if last is not None and now - last < cooldown:
-            return None
-        self._last_alarm[key] = now
+        if last is not None:
+            last_ts, last_rank = last
+            # Inside the cooldown only a *more severe* finding may speak up:
+            # a topic that turns critical must not wait behind its own warning.
+            if now - last_ts < cooldown and rank <= last_rank:
+                return None
+        self._last_alarm[key] = (now, rank)
         return Alarm(
             kind=kind,
             severity=severity,
@@ -241,7 +266,7 @@ class AnomalyDetector:
                 if alarm:
                     alarms.append(alarm)
 
-        if len(tracker.gaps) >= min(5, max(3, self.config.rate_window // 4)):
+        if len(tracker.gaps) >= min(5, max(3, self._rate_window // 4)):
             rate = tracker.rate_hz()
             if rate is not None and rate < rule.expected_hz * self.config.rate_warn_ratio:
                 alarm = self._emit(
@@ -285,11 +310,18 @@ class AnomalyDetector:
                 vy = float(data.get("vy", 0.0) or 0.0)
                 speed = math.hypot(vx, vy)
             speed = abs(float(speed))
-            if speed > self.config.estop_speed_threshold:
+            if speed > self.config.estop_speed_threshold and self._estop_zero_since is not None:
+                # Debounce: a normal stop also publishes cmd_vel=0 and the odom
+                # speed decays for a moment. Only a zero command that is still
+                # zero `estop_debounce_s` later, with odom still moving, means
+                # the control path was cut.
+                zero_for = now - self._estop_zero_since
+                if zero_for < self.config.estop_debounce_s:
+                    return alarms
                 alarm = self._emit(
                     "estop_command",
                     "warning",
-                    f"cmd_vel=0 인데 odom 속도 {speed:.2f} m/s - 비상정지/제어 명령 확인 필요",
+                    f"cmd_vel=0 이 {zero_for:.2f}s 지속인데 odom 속도 {speed:.2f} m/s - 비상정지/제어 명령 확인 필요",
                     now,
                     "/cmd_vel",
                     value=speed,

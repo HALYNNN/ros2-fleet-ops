@@ -38,17 +38,22 @@ CREATE TABLE IF NOT EXISTS samples (
     seq       INTEGER,
     source_ts REAL NOT NULL,
     recv_ts   REAL NOT NULL,
+    wall_ts   REAL,
     data      TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_samples_run_topic_ts ON samples(run_id, topic, source_ts);
 CREATE INDEX IF NOT EXISTS idx_samples_run_recv ON samples(run_id, recv_ts);
 CREATE INDEX IF NOT EXISTS idx_samples_robot_topic ON samples(robot_id, topic, id);
+-- recent_samples() reads the tail of one run by id; without this index SQLite
+-- sorts the whole run_id subset before it can LIMIT it.
+CREATE INDEX IF NOT EXISTS idx_samples_run_id ON samples(run_id, id);
 
 CREATE TABLE IF NOT EXISTS alarms (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id    TEXT NOT NULL,
     robot_id  TEXT NOT NULL,
     ts        REAL NOT NULL,
+    wall_ts   REAL,
     kind      TEXT NOT NULL,
     severity  TEXT NOT NULL,
     topic     TEXT,
@@ -59,6 +64,13 @@ CREATE TABLE IF NOT EXISTS alarms (
 CREATE INDEX IF NOT EXISTS idx_alarms_run_ts ON alarms(run_id, ts);
 CREATE INDEX IF NOT EXISTS idx_alarms_kind ON alarms(kind);
 """
+
+#: Columns added after the first release. `CREATE TABLE IF NOT EXISTS` does not
+#: touch an existing database, so they are added with ALTER TABLE on open.
+MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+    ("samples", "wall_ts", "REAL"),
+    ("alarms", "wall_ts", "REAL"),
+)
 
 
 def _new_run_id(robot_id: str, now: float | None = None) -> str:
@@ -91,7 +103,17 @@ class Store:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.executescript(SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Bring an already existing database up to the current schema."""
+        for table, column, decl in MIGRATIONS:
+            existing = {
+                row["name"] for row in self._conn.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            if column not in existing:
+                self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
     # ------------------------------------------------------------------ runs
 
@@ -172,6 +194,12 @@ class Store:
         runs = self.list_runs(limit=1, robot_id=robot_id)
         return runs[0] if runs else None
 
+    def count_runs(self) -> int:
+        """Cheap run count for `/api/health` (no per-run subqueries)."""
+        with self._lock:
+            row = self._conn.execute("SELECT COUNT(*) AS n FROM runs").fetchone()
+        return int(row["n"])
+
     # --------------------------------------------------------------- samples
 
     def insert_sample(
@@ -183,7 +211,12 @@ class Store:
         source_ts: float,
         recv_ts: float,
         data: dict[str, Any] | None = None,
+        wall_ts: float | None = None,
     ) -> None:
+        # `recv_ts` may be the ROS/Gazebo clock (`--use-sim-time` starts near 0),
+        # which cannot be compared with `time.time()`. `wall_ts` is always the
+        # host clock and is what liveness/age checks use.
+        wall = time.time() if wall_ts is None else float(wall_ts)
         payload = json.dumps(data or {}, separators=(",", ":"), sort_keys=True)
         record = {
             "record_type": "sample",
@@ -193,13 +226,14 @@ class Store:
             "seq": seq,
             "source_ts": round(float(source_ts), 6),
             "recv_ts": round(float(recv_ts), 6),
+            "wall_ts": round(wall, 6),
             "data": data or {},
         }
         with self._lock:
             self._conn.execute(
-                "INSERT INTO samples (run_id, robot_id, topic, seq, source_ts, recv_ts, data)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (run_id, robot_id, topic, seq, float(source_ts), float(recv_ts), payload),
+                "INSERT INTO samples (run_id, robot_id, topic, seq, source_ts, recv_ts, wall_ts, data)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (run_id, robot_id, topic, seq, float(source_ts), float(recv_ts), wall, payload),
             )
             self._conn.commit()
         self._append_jsonl(run_id, record)
@@ -208,6 +242,7 @@ class Store:
         """Bulk insert records shaped like `insert_sample` arguments."""
         rows = []
         for record in records:
+            wall = record.get("wall_ts")
             rows.append(
                 (
                     record["run_id"],
@@ -216,6 +251,7 @@ class Store:
                     record.get("seq"),
                     float(record["source_ts"]),
                     float(record["recv_ts"]),
+                    time.time() if wall is None else float(wall),
                     json.dumps(record.get("data") or {}, separators=(",", ":"), sort_keys=True),
                 )
             )
@@ -223,8 +259,8 @@ class Store:
             return 0
         with self._lock:
             self._conn.executemany(
-                "INSERT INTO samples (run_id, robot_id, topic, seq, source_ts, recv_ts, data)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO samples (run_id, robot_id, topic, seq, source_ts, recv_ts, wall_ts, data)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
             self._conn.commit()
@@ -308,10 +344,13 @@ class Store:
     # ---------------------------------------------------------------- alarms
 
     def insert_alarm(self, alarm: dict[str, Any]) -> None:
+        wall = alarm.get("wall_ts")
+        wall = time.time() if wall is None else float(wall)
         row = (
             alarm["run_id"],
             alarm.get("robot_id", ""),
             float(alarm["ts"]),
+            wall,
             alarm["kind"],
             alarm.get("severity", "warning"),
             alarm.get("topic"),
@@ -321,8 +360,8 @@ class Store:
         )
         with self._lock:
             self._conn.execute(
-                "INSERT INTO alarms (run_id, robot_id, ts, kind, severity, topic, message, value, threshold)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO alarms (run_id, robot_id, ts, wall_ts, kind, severity, topic, message, value, threshold)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 row,
             )
             self._conn.commit()
@@ -331,6 +370,7 @@ class Store:
             {
                 "record_type": "alarm",
                 "ts": round(float(alarm["ts"]), 6),
+                "wall_ts": round(wall, 6),
                 "robot_id": alarm.get("robot_id", ""),
                 "kind": alarm["kind"],
                 "severity": alarm.get("severity", "warning"),
@@ -363,7 +403,7 @@ class Store:
         params.append(int(limit))
         with self._lock:
             rows = self._conn.execute(sql, params).fetchall()
-        return [dict(row) for row in rows]
+        return [_alarm_row(row) for row in rows]
 
     def alarm_counts(self, run_id: str) -> dict[str, int]:
         with self._lock:
@@ -442,4 +482,14 @@ def _sample_row(row: sqlite3.Row) -> dict[str, Any]:
         item["data"] = json.loads(item["data"])
     except (TypeError, json.JSONDecodeError):
         item["data"] = {}
+    # Rows written before the wall_ts column existed only have recv_ts.
+    if item.get("wall_ts") is None:
+        item["wall_ts"] = item["recv_ts"]
+    return item
+
+
+def _alarm_row(row: sqlite3.Row) -> dict[str, Any]:
+    item = dict(row)
+    if item.get("wall_ts") is None:
+        item["wall_ts"] = item["ts"]
     return item

@@ -25,6 +25,9 @@ curl -s localhost:8000/api/robots | jq '.[0].health, .[0].topics'
 | `rate_low` | `ros2 topic hz`, 노드 파라미터 | 발행 주기 설정 변경, CPU 부하 | 파라미터 원복 또는 부하 분산 |
 | `estop_command` | `ros2 topic echo /cmd_vel`, 비상정지 입력 | 관제 정지 명령, 자율주행 노드 종료 | 정지 해제 절차, 명령 발행자 확인 |
 
+`estop_command`는 `cmd_vel`이 0이 된 뒤 `estop_debounce_s`(기본 0.5s) 동안 계속 0인데도 `odom` 속도가 기준(0.02 m/s)을 넘을 때만 발생합니다. 정상 제동은 `cmd_vel`=0이 잠깐 나타나므로 걸리지 않습니다.
+`--use-sim-time`으로 돌 때 알람·샘플의 `ts`/`recv_ts`는 시뮬레이션 시간(0 근처)이고, 화면·생존 판정에 쓰는 실제 시각은 `wall_ts`입니다.
+
 ```bash
 # 현재 run의 알람
 curl -s "localhost:8000/api/alarms?limit=50" | jq '.[] | {ts,severity,topic,kind,message}'

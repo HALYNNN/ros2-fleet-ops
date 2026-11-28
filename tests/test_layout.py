@@ -50,6 +50,21 @@ def test_sim_entrypoint_launches_gazebo():
     assert "TURTLEBOT3_MODEL" in script
 
 
+def test_collector_entrypoint_sources_ros_when_present():
+    script_path = ROOT / "collector" / "docker-entrypoint.sh"
+    script = script_path.read_text(encoding="utf-8")
+    # ROS is only sourced if the base image provides it, so `--mode sim` on
+    # python:*-slim keeps working.
+    assert "/opt/ros/" in script and "setup.bash" in script
+    assert "-f " in script
+    assert 'exec python3 -m collector.collector "$@"' in script
+    assert script_path.stat().st_mode & 0o111, "entrypoint must be executable"
+
+    dockerfile = (ROOT / "collector" / "Dockerfile").read_text(encoding="utf-8")
+    assert 'ENTRYPOINT ["/app/collector/docker-entrypoint.sh"]' in dockerfile
+    assert "chmod +x /app/collector/docker-entrypoint.sh" in dockerfile
+
+
 def test_systemd_unit_is_installable():
     text = (ROOT / "deploy" / "ros2-fleet-ops.service").read_text(encoding="utf-8")
     assert "[Unit]" in text and "[Service]" in text and "[Install]" in text

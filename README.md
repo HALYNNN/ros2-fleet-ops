@@ -95,10 +95,14 @@ docs/runbook.md   # 장애 대응 런북
 | `topic_drop` | 메시지 결번 | 발행 seq 연속성 위반 (시뮬레이터 모드에서 검증) |
 | `gap_spike` | 순간 지연 | 수신 간격 > 기대 주기 × 2.5 (정지 판정 전) |
 | `latency_high` | 지연 예산 초과 | `recv_ts - source_ts > max_latency_s`, 2배 초과 시 critical |
-| `rate_low` | 발행 주기 저하 | 최근 구간 측정 주기 < 기대 × 0.5 |
-| `estop_command` | 비상정지 추정 | `cmd_vel`이 0인데 `odom` 속도 > 0.02 m/s |
+| `rate_low` | 발행 주기 저하 | 최근 `rate_window` 구간 측정 주기 < 기대 × 0.5 |
+| `estop_command` | 비상정지 추정 | `cmd_vel`=0이 `estop_debounce_s`(기본 0.5s) 이상 지속인데 `odom` 속도 > 0.02 m/s |
 
 알람은 `(토픽, 종류)`별 쿨다운을 두어 한 번의 장애가 수백 건으로 늘어나지 않게 합니다.
+쿨다운은 심각도 상승을 막지 않습니다. 같은 항목이 warning → critical로 올라가면 쿨다운 중이라도 즉시 발생합니다.
+
+`--use-sim-time`(Gazebo `/clock`)으로 돌 때 `recv_ts`·`ts`는 0 근처의 시뮬레이션 시간이므로, 샘플·알람에는
+호스트 시각 `wall_ts`를 함께 저장합니다. 웹 모니터의 로봇 생존 판정과 최근 5분 알람 필터는 `wall_ts`를 사용합니다.
 
 ## 4. 빠른 시작 A — ROS 2 없이 (시뮬레이터 어댑터)
 

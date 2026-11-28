@@ -167,7 +167,7 @@ def test_closed_old_run_is_reported_as_recording(seeded):
     store.start_run("tb3-old", source="sim", run_id="old-run", started_at=old)
     store.insert_sample(
         run_id="old-run", robot_id="tb3-old", topic="/odom", seq=1,
-        source_ts=old, recv_ts=old, data={"x": 0.0, "y": 0.0},
+        source_ts=old, recv_ts=old, wall_ts=old, data={"x": 0.0, "y": 0.0},
     )
     store.finish_run("old-run", finished_at=old + 5)
     robots = {robot["robot_id"]: robot for robot in client.get("/api/robots").json()}

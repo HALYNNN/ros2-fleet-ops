@@ -28,8 +28,13 @@ RUN if ! python3 -m pip --version >/dev/null 2>&1; then \
 RUN mkdir -p /data
 VOLUME ["/data"]
 
+RUN chmod +x /app/collector/docker-entrypoint.sh
+
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
   CMD python3 -m collector.healthcheck --db /data/fleet.db --max-age 25 || exit 1
 
-ENTRYPOINT ["python3", "-m", "collector.collector"]
+# The ROS env is sourced by the entrypoint, not by `python3 -m ...` directly:
+# Docker's exec form does not read /opt/ros/*/setup.bash, and `ros:humble` images
+# only export it from their shell setup files.
+ENTRYPOINT ["/app/collector/docker-entrypoint.sh"]
 CMD ["--mode", "ros2", "--db", "/data/fleet.db", "--jsonl-dir", "/data/jsonl", "--use-sim-time"]

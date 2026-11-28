@@ -50,6 +50,17 @@ def _rate_from_samples(samples: list[dict[str, Any]]) -> float | None:
     return round((len(samples) - 1) / span, 2)
 
 
+def _wall_ts(item: dict[str, Any], fallback: str = "recv_ts") -> float:
+    """Host clock timestamp for a sample/alarm row.
+
+    `recv_ts` / `ts` come from the telemetry clock, which under
+    `--use-sim-time` starts at Gazebo's `/clock` (near 0) and cannot be compared
+    with `time.time()`. `wall_ts` is stored next to it for liveness and age.
+    """
+    wall = item.get("wall_ts")
+    return float(wall if wall is not None else item[fallback])
+
+
 def robot_status(store: Store, robot_id: str, *, now: float | None = None) -> dict[str, Any]:
     """Live status for one robot built from its latest run's recent samples."""
     now = time.time() if now is None else now
@@ -88,9 +99,9 @@ def robot_status(store: Store, robot_id: str, *, now: float | None = None) -> di
 
     alarms = store.fetch_alarms(run_id=run["run_id"], limit=20)
     last_alarm = alarms[0] if alarms else None
-    recent_critical = [a for a in alarms if a["severity"] == "critical" and now - a["ts"] < 300]
-    recent_warning = [a for a in alarms if a["severity"] == "warning" and now - a["ts"] < 300]
-    last_seen = max((sample["recv_ts"] for sample in recent), default=None)
+    recent_critical = [a for a in alarms if a["severity"] == "critical" and now - _wall_ts(a, "ts") < 300]
+    recent_warning = [a for a in alarms if a["severity"] == "warning" and now - _wall_ts(a, "ts") < 300]
+    last_seen = max((_wall_ts(sample) for sample in recent), default=None)
     if last_seen is None:
         health = "stale" if run["open"] else "recorded"
     elif now - last_seen > 10:
@@ -139,7 +150,7 @@ def create_app(db_path: str | Path | None = None, jsonl_dir: str | Path | None =
             "status": "ok",
             "time": time.time(),
             "db": db,
-            "runs": len(store.list_runs(limit=1000)),
+            "runs": store.count_runs(),
             "collector": heartbeat,
             "collector_alive": bool(heartbeat and time.time() - heartbeat.get("ts", 0) <= 30),
         }

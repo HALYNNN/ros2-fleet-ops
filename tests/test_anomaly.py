@@ -109,11 +109,16 @@ def test_estop_inferred_from_zero_cmd_while_moving():
     base = 100.0
     detector.check("/cmd_vel", seq=1, source_ts=base, recv_ts=base, data={"linear_x": 0.2, "angular_z": 0.0})
     detector.check("/cmd_vel", seq=2, source_ts=base + 0.1, recv_ts=base + 0.1, data={"linear_x": 0.0, "angular_z": 0.0})
-    alarms = detector.check(
+    # Normal braking also commands zero; inside the debounce window nothing fires.
+    assert detector.check(
         "/odom", seq=9, source_ts=base + 0.15, recv_ts=base + 0.15, data=odom(linear_x=0.18)
+    ) == []
+    alarms = detector.check(
+        "/odom", seq=10, source_ts=base + 0.7, recv_ts=base + 0.7, data=odom(linear_x=0.18)
     )
     assert [alarm.kind for alarm in alarms] == ["estop_command"]
     assert alarms[0].topic == "/cmd_vel"
+    assert "0.60s" in alarms[0].message
 
 
 def test_no_estop_alarm_when_robot_stopped():
