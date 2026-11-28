@@ -137,15 +137,14 @@ py -m collector.collector --mode sim --duration 30
 `--mode auto`(기본)는 `rclpy`가 import되면 ROS 2, 아니면 시뮬레이터로 자동 선택합니다.
 시뮬레이터는 TurtleBot3 burger의 발행 주기(odom 20 Hz, scan 10 Hz, cmd_vel 10 Hz)와 사각 순찰 경로, 벽까지의 거리를 계산한 36빔 스캔을 생성합니다.
 
-데모 데이터는 저장소에 들어 있지 않습니다(`data/`·`*.db`·`*.jsonl`은 `.gitignore` 대상). 대시보드를 띄우기 전에 시뮬레이터 모드로 run을 하나 이상 만들어 두세요. 위 1) 명령이 `data/fleet.db`에 정상 주행 run을 적재하고 `data/jsonl/`에 원본을 남깁니다.
+데모 데이터는 저장소에 들어 있지 않습니다(`data/`·`*.db`·`*.jsonl`은 `.gitignore` 대상). 대시보드는 DB 파일 하나만 있으면 되므로, 시뮬레이터 모드로 run을 한 번 만들어 두고 띄우면 됩니다.
 
 ```bash
 python -m collector.collector --mode sim --duration 30 --db data/fleet.db --jsonl-dir data/jsonl
-uvicorn web_monitor.main:app --host 0.0.0.0 --port 8000
-# http://localhost:8000  (기본으로 data/fleet.db를 읽습니다)
+uvicorn web_monitor.main:app --port 8000     # 기본 DB는 data/fleet.db
 ```
 
-장애 run까지 함께 보고 싶으면 2) `inject_fault.py`를 한 번 실행해 같은 DB에 run을 추가한 뒤 대시보드를 열면 됩니다. 다른 DB 파일을 쓰려면 `FLEET_DB=data/other.db uvicorn web_monitor.main:app --port 8000`처럼 환경 변수로 지정합니다.
+장애 run까지 함께 보고 싶으면 `inject_fault.py`를 한 번 실행해 같은 DB에 run을 추가하면 됩니다. 다른 DB 파일을 쓰려면 `FLEET_DB=data/other.db uvicorn web_monitor.main:app --port 8000`처럼 환경 변수로 지정합니다.
 
 ## 5. 빠른 시작 B — Docker Compose + Gazebo
 
